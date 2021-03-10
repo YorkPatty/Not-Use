@@ -7,6 +7,15 @@
 % MAP --> IDdata{i}.simout.signals.values(:,7)
 % EGR (out) --> IDdata{i}.simout.signals.values(:,14)
 
+% Things to do/figure out:
+    % use to workspace data and then convert to iddata just like the original script does (allows for data manipulation or in this case getting rid of transient response)
+    % measure engine speed and send in as a measured disturbance
+    % the data seems to say that MAP is in the ten thousands --> should be less than torque which is like max 250 maybe 
+    % figure out max rate changes
+    % Define weights on variables
+    % figure out what 'MaxEcr' and 'MinECR' are
+    % try to include unmeasured disturbances
+
 %Create system identification models
 function [MPCobjs,Fits,Validations]=GenerateMPCDesignsTry1(iddataCollection,vddataCollection)
 
