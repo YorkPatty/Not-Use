@@ -7,15 +7,13 @@
 % MAP --> IDdata{i}.simout.signals.values(:,7)
 % EGR (out) --> IDdata{i}.simout.signals.values(:,14)
 
-% Things to do/figure out:
-    % use to workspace data and then convert to iddata just like the original script does (allows for data manipulation or in this case getting rid of transient response)
-    % measure engine speed and send in as a measured disturbance
-    % the data seems to say that MAP is in the ten thousands --> should be less than torque which is like max 250 maybe 
-    % figure out max rate changes
-    % Define weights on variables
-    % figure out what 'MaxEcr' and 'MinECR' are
-    % try to include unmeasured disturbances
-
+% Things to do/figure out:    
+    % understand weights and min/max rate of change ('RateMin' and 'RateMax')    
+    % try to include a second unmeasured disturbance
+    % understand how the validation works
+    % automate implementation of the multiple mpc's into the system
+        % idk if we're expected to automate this though
+    
 %Create system identification models
 function [MPCobjs,Fits,Validations]=GenerateMPCDesignsTry1(iddataCollection,vddataCollection)
 
@@ -26,22 +24,20 @@ function [MPCobjs,Fits,Validations]=GenerateMPCDesignsTry1(iddataCollection,vdda
      
       %Set up system identification input data for ThrottlePos and Speed
      % JUST UNPACKAGING IDDATA (inputs)
-      u=[iddataCollection{i}.InputData(:,1)]; 
-         
+      u=[iddataCollection{i}.signals.values(:,1:2)]; % iddataCollection{i}.signals.values(:,2)]; 
         %  FuelMass 
         %  IDdata{i}.simin.signals.values(:,4)];  
       
      % Set up system identification output data for MAP
      % JUST UNPACKAGING IDDATA (outputs)
-      y=iddataCollection{i}.OutputData(:,1); 
+      y=iddataCollection{i}.signals.values(:,3); 
       
       % set to >2 based on just looking at DataAnalyzer and seeing where it
       % stops growing
       % JUST CLEANING UP THE DATA TO GET PURE STEADY STATE RESPONSE
-      ind=find(iddataCollection{i}.sa(:,1)>3.);  %Find initial steady-state start point to remove initial engine startup transient
-      % z=iddata(y(ind,:),u(ind,:));
-      z = iddataCollection{i};
-      %z.Ts=0.01; % same sampling time as current system
+      ind=find(iddataCollection{i}.time(:,1)>0.5);  %Find initial steady-state start point to remove initial engine startup transient
+      z=iddata(y(ind,:),u(ind,:));
+      z.Ts=0.01; % same sampling time as current system
       
       % creating fourth order state space models using system identifaction
       % toolbox
@@ -62,19 +58,19 @@ function [MPCobjs,Fits,Validations]=GenerateMPCDesignsTry1(iddataCollection,vdda
       %Plant validation
    %   FuelMass=1000.*VData{i}.simout.signals.values(:,11)./(VData{i}.simin.signals.values(:,3).*(2.*VData{i}.simin.signals.values(:,4)/60.));  %Calculate fuel mass from AFR and airflow data
      
-   u=[VData{i}.InputData(:,1)];
+   u=[vddataCollection{i}.signals.values(:,1:2)];% vddataCollection{i}.signals.values(:,2)];
         % FuelMass 
         % VData{i}.simin.signals.values(:,4)];  %Set up system identification input data for EGR, VGT, FUEL, SPEED
-      y=VData{i}.OutputData(:,1); %Set up system identifaction output data for MAP, EGR
-      ind=find(VData{i}.sa>3.);  %Find initial steady-state start point to remove initial engine startup transient
+      y=vddataCollection{i}.signals.values(:,3); %Set up system identifaction output data for MAP, EGR
+      ind=find(vddataCollection{i}.time>0.5);  %Find initial steady-state start point to remove initial engine startup transient
       z=iddata(y(ind,:),u(ind,:));
-      z.Ts=vddataCollection.Ts;
+      z.Ts=0.01;
       yout=sim(IDmodel,z.InputData);
       time=(0:size(yout,1)-1)'*z.Ts;
-      Validations{i}=[time z.OutputData(:,1) yout(:,1) z.OutputData(:,2) yout(:,2)];
+      Validations{i}=[time z.OutputData(:,1) yout(:,1)]; % z.OutputData(:,2) yout(:,2)];
       
    end
-
+ 
 end
 
 
@@ -85,7 +81,7 @@ function MPCobj=DesignMPC(IDmodel,IDdata)
    Plant.InputUnit='';
    
    % Augment plant with unmeasured disturbance channel.
-   %set(Plant, 'B', [Plant.B Plant.B(:,1)], 'D', [Plant.D Plant.D(:,1)]);
+   set(Plant, 'B', [Plant.B Plant.B(:,1)], 'D', [Plant.D Plant.D(:,1)]);
    
    % Assign names to I/O variables
    % INPUTS: 
@@ -95,9 +91,9 @@ function MPCobj=DesignMPC(IDmodel,IDdata)
         
    % OUTPUTS:
         % BOOST and EGRMASSFLOW --> keep BOOST (MAP) and delete EGRMASSFLOW
-   set(Plant, 'InputName', {'THRPOS'},...
+   set(Plant, 'InputName', {'THRPOS'; 'SPEED'; 'UD1'},...
     'OutputName', {'MAP'},...
-    'InputUnit', {'mm'},...
+    'InputUnit', {'%', 'rpm', ''},...
     'OutputUnit', {'KPa'});
     
     % MAKE INTO setmpcsignals(Plant, 'mv', [1], 'md', [2], 'ud', [3,4],   'mo', [1]);
@@ -105,11 +101,11 @@ function MPCobj=DesignMPC(IDmodel,IDdata)
     %                              
     % Assign MPC channel type
     % Plant = setmpcsignals(Plant,'mv',[1 2],'md',[3 4],'ud',[5 6],'mo',[1 2]);
-    setmpcsignals(Plant, 'mv', [1], 'mo', [1]);
+    setmpcsignals(Plant, 'mv', [1],'md', [2], 'ud', [3],'mo', [1]);
     Model.Plant = Plant;
     
     %Set nomimal inputs and outputs obtained at the equilibrium operating point
-    Model.Nominal.U=[mean(IDdata.u)];
+    Model.Nominal.U=[mean(IDdata.u) 0];
     Model.Nominal.Y=mean(IDdata.y);
     Model.Nominal.X=[0 0 0 0];
     Model.Nominal.DX=[0 0 0 0];
@@ -123,14 +119,14 @@ function MPCobj=DesignMPC(IDmodel,IDdata)
     % EGRPOS, VGTPOS move full-range approx 1 second, FUELMASS can move
     % full-range approx 100 ms, SPEED is the slowest input, moving on order of
     % several seconds.
-    InputSpecs(1)=struct('Min',0.1,'Max',5,'RateMin',-0.5,'RateMax',0.5,'MinECR',1,'MaxECR',1,'RateMinECR',0,'RateMaxECR',0);
+    InputSpecs(1)=struct('Min',0,'Max',100,'RateMin',-0.5,'RateMax',0.5,'MinECR',1,'MaxECR',1,'RateMinECR',0,'RateMaxECR',0);
     %InputSpecs(2)=struct('Min',0.1,'Max',0.9,'RateMin',-0.05,'RateMax',0.05,'MinECR',1,'MaxECR',1,'RateMinECR',0,'RateMaxECR',0);
     OutputSpecs(1)=struct('Min',0.8*min(IDdata.y(:,1)),'Max',1.2*max(IDdata.y(:,1)),'MinECR',1,'MaxECR',1);
     %OutputSpecs(2)=struct('Min',0.8*min(IDdata.y(:,2)),'Max',1.2*max(IDdata.y(:,2)),'MinECR',1,'MaxECR',1);
 
     %% Define weights on manipulated and controlled variables.
-    Weights=struct('ManipulatedVariables',[0],...
-       'ManipulatedVariablesRate',[1],...
+    Weights=struct('ManipulatedVariables',[0,0,0],...
+       'ManipulatedVariablesRate',[1,1,1],...
        'OutputVariables',[0.1]);
 
     %% Create MPC controller in MATLAB
