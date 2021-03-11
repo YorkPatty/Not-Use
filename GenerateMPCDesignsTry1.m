@@ -17,7 +17,7 @@
 %Create system identification models
 function [MPCobjs,Fits,Validations]=GenerateMPCDesignsTry1(iddataCollection,vddataCollection)
 
-   for i=1:length(iddataCollection(:,1)),
+   for i=1:length(iddataCollection(1,:)),
        
       %Plant fit 
     %  FuelMass=1000.*IDdata{i}.simout.signals.values(:,11)./(IDdata{i}.simin.signals.values(:,3).*(2.*IDdata{i}.simin.signals.values(:,4)/60.));  %Calculate fuel mass from AFR and airflow data
