@@ -1,4 +1,5 @@
-function [MPCobjs,Fits,Validations]=GenerateMPCDesignsTry1(iddataCollection,vddataCollection)
+%function [MPCobjs, Fits, Validations, BestFit]=GenerateMPCDesignsTry1(iddataCollection,vddataCollection)
+function [Fits, Validations, BestFit]=GenerateMPCDesignsTry1(iddataCollection,vddataCollection)
 % This function takes simulated input/output data and creates state space
 % models. 
 
@@ -24,17 +25,17 @@ function [MPCobjs,Fits,Validations]=GenerateMPCDesignsTry1(iddataCollection,vdda
       u = [iddataCollection{i}.signals.values(:,1)]; % add Wg (:,1:2)
       
      % unpackaging output (MAP)
-      y=iddataCollection{i}.signals.values(:,3); 
+      y=[iddataCollection{i}.signals.values(:,3)]; 
       
       % clean up data and create iddata object
-      % set value of 2 chosen based on examination of data inspector
-      ind=find(iddataCollection{i}.time(:,1)>2);  %Find initial steady-state start point to remove initial engine startup transient
+      % set value of  chosen based on examination of data inspector
+      ind=find(iddataCollection{i}.time(:,1)>10);  %Find initial steady-state start point to remove initial engine startup transient
       z=iddata(y(ind,:),u(ind,:)); % create iddata object with i/o data
       z.Ts=0.01; % same sampling time as SI Engine Dyno system
       
       % create specified order state space models
         % order of 5 works well for throttle to MAP
-      IDmodel=n4sid(z,5,'Ts',0.01,'DisturbanceModel','none');
+      IDmodel=n4sid(z,2,'Ts',0.01,'DisturbanceModel','none');
       
       % simulate the response (yout) of the identified model(state space); 
       yout=sim(IDmodel,z.InputData); % yout is the outputs from the model
@@ -43,15 +44,16 @@ function [MPCobjs,Fits,Validations]=GenerateMPCDesignsTry1(iddataCollection,vdda
       % Saving the time, measured and simulated outputs for later analysis
       % FUNCTION OUTPUT
       Fits{i}=[time z.OutputData(:,1) yout(:,1)]; % add more depending on number of outputs
-      
+      [y fits ic] = compare(z, IDmodel);
+          GoodFits(i) = fits; % store to see fit of each MPC
       %Design MPC Control
-      MPCobjs{i}=DesignMPC(IDmodel,z); % FUNCTION OUTPUT
+%       MPCobjs{i} = DesignMPC(IDmodel,z); % FUNCTION OUTPUT
       
       %Plant validation   
       % unpackage data
       u=[vddataCollection{i}.signals.values(:,1)];% add 2 for (:,1:2)
-      y=vddataCollection{i}.signals.values(:,3); %Set up system identifaction output data for MAP, EGR
-      ind=find(vddataCollection{i}.time>0.5);  %Find initial steady-state start point to remove initial engine startup transient
+      y=[vddataCollection{i}.signals.values(:,3)]; %Set up system identifaction output data for MAP, EGR
+      ind=find(vddataCollection{i}.time>10);  %Find initial steady-state start point to remove initial engine startup transient
       z=iddata(y(ind,:),u(ind,:)); % create iddata object
       z.Ts=0.01; % set sample time
       yout=sim(IDmodel,z.InputData); % simulate output response of model
@@ -99,7 +101,7 @@ function MPCobj=DesignMPC(IDmodel,IDdata)
                                
     % Assign MPC channel type
     % Plant = setmpcsignals(Plant,'mv',[1 2],'md',[3],'ud',[4 5],'mo',[1]);
-    setmpcsignals(Plant, 'mv', [1],'mo', [1]);
+    setmpcsignals(Plant, 'mv', [1], 'mo', [1]);
     Model.Plant = Plant;
     
     %Set nomimal inputs and outputs obtained at the equilibrium operating point
@@ -109,16 +111,16 @@ function MPCobj=DesignMPC(IDmodel,IDdata)
     Model.Nominal.DX=[0 0 0 0];
 
     %% Define sample time and horizons
-    Ts=0.05; % sample time
-    p=40;   % prediction time is about 4 seconds --> 
-    m=4;    % 10% of prediction horizon
+    Ts=0.01; % sample time
+    p=20;   % prediction time is about 4 seconds --> 
+    m=2;    % 10% of prediction horizon
 
     %% Define hard and soft constraints
     % EGRPOS, VGTPOS move full-range approx 1 second, FUELMASS can move
     % full-range approx 100 ms, SPEED is the slowest input, moving on order of
     % several seconds.
     InputSpecs(1)=struct('Min',0,'Max',100,'RateMin',-0.5,'RateMax',0.5,'MinECR',1,'MaxECR',1,'RateMinECR',0,'RateMaxECR',0);
-    %InputSpecs(2)=struct('Min',0.1,'Max',0.9,'RateMin',-0.05,'RateMax',0.05,'MinECR',1,'MaxECR',1,'RateMinECR',0,'RateMaxECR',0);
+    %InputSpecs(2)=struct('Min',0.01,'Max',0.9,'RateMin',-0.05,'RateMax',0.05,'MinECR',1,'MaxECR',1,'RateMinECR',0,'RateMaxECR',0);
     OutputSpecs(1)=struct('Min',0.8*min(IDdata.y(:,1)),'Max',1.2*max(IDdata.y(:,1)),'MinECR',1,'MaxECR',1);
     %OutputSpecs(2)=struct('Min',0.8*min(IDdata.y(:,2)),'Max',1.2*max(IDdata.y(:,2)),'MinECR',1,'MaxECR',1);
 
